@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zone Express - الموظفون</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+</head>
+<body>
+  <div class="main" id="main-content" style="display:none">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="openSidebar()"><i class="ti ti-menu-2"></i></button>
+      <span class="page-title">الموظفون</span>
+      <button class="btn primary sm" onclick="openModal('modal-add-user')"><i class="ti ti-plus"></i> موظف جديد</button>
+    </div>
+
+    <div class="card">
+      <div class="tabs">
+        <div class="tab active" onclick="setTab('all',this)">الكل</div>
+        <div class="tab" onclick="setTab('admin',this)">مديرين</div>
+        <div class="tab" onclick="setTab('accountant',this)">محاسبين</div>
+        <div class="tab" onclick="setTab('callcenter',this)">كول سنتر</div>
+        <div class="tab" onclick="setTab('courier',this)">مناديب</div>
+        <div class="tab" onclick="setTab('client',this)">عملاء</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>الاسم</th><th>الدور</th><th>البريد الإلكتروني</th><th>الحالة</th><th>تاريخ الإضافة</th><th>إجراءات</th></tr></thead>
+          <tbody id="emp-table"><tr><td colspan="6"><div class="loading"><div class="spinner"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add User -->
+  <div class="modal-bg" id="modal-add-user">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">إضافة موظف جديد</span>
+        <button class="btn sm" onclick="closeModal('modal-add-user')"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">الاسم الكامل *</label><input class="form-input" id="new-name" placeholder="الاسم الكامل"></div>
+        <div class="form-group"><label class="form-label">البريد الإلكتروني *</label><input class="form-input" id="new-email" type="email" placeholder="email@example.com" dir="ltr"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">الدور *</label>
+          <select class="form-input" id="new-role">
+            <option value="">اختر الدور</option>
+            <option value="admin">مدير</option>
+            <option value="accountant">محاسب</option>
+            <option value="callcenter">كول سنتر</option>
+            <option value="courier">مندوب</option>
+            <option value="client">عميل</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">كلمة المرور *</label>
+          <input class="form-input" id="new-password" type="password" placeholder="كلمة مرور مؤقتة">
+        </div>
+      </div>
+      <div id="courier-extra" style="display:none">
+        <div class="form-group"><label class="form-label">رقم هاتف المندوب</label><input class="form-input" id="new-phone" type="tel" placeholder="01xxxxxxxxx" dir="ltr"></div>
+        <div class="form-group"><label class="form-label">المنطقة</label><input class="form-input" id="new-zone" placeholder="المنطقة أو المحافظة"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="closeModal('modal-add-user')">إلغاء</button>
+        <button class="btn primary" id="add-user-btn" onclick="doAddUser()"><i class="ti ti-check"></i> إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { checkSession } from "./auth.js";
+    import { renderSidebar, toast, openModal, closeModal, formatDate } from "./ui.js";
+    import { listenEmployees, addEmployee, toggleEmployeeStatus, roleLabels, roleColors } from "./users.js";
+
+    window.openModal = openModal;
+    window.closeModal = closeModal;
+
+    let allEmployees = [];
+    let filterRole = "all";
+
+    checkSession(() => {
+      if (localStorage.getItem("sf_role") !== "admin") {
+        window.location.href = "dashboard.html";
+        return;
+      }
+      renderSidebar("employees");
+      document.getElementById("main-content").style.display = "block";
+
+      document.getElementById("new-role").addEventListener("change", function() {
+        document.getElementById("courier-extra").style.display = this.value === "courier" ? "block" : "none";
+      });
+
+      listenEmployees((employees) => {
+        allEmployees = employees;
+        renderTable(employees);
+      });
+    });
+
+    window.setTab = function(role, el) {
+      filterRole = role;
+      document.querySelectorAll(".tabs .tab").forEach(t => t.classList.remove("active"));
+      el.classList.add("active");
+      const filtered = role === "all" ? allEmployees : allEmployees.filter(e => e.role === role);
+      renderTable(filtered);
+    };
+
+    function renderTable(employees) {
+      const tb = document.getElementById("emp-table");
+      if (!employees.length) {
+        tb.innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-users"></i>لا يوجد موظفون</div></td></tr>`;
+        return;
+      }
+      tb.innerHTML = employees.map(emp => {
+        const initials = emp.name ? emp.name.split(" ").slice(0,2).map(w=>w[0]).join("") : "؟";
+        const roleColor = roleColors[emp.role] || "gray";
+        const roleLabel = roleLabels[emp.role] || emp.role;
+        const isActive = emp.status !== "inactive";
+        return `<tr>
+          <td><div style="display:flex;align-items:center;gap:8px">
+            <div class="avatar" style="background:var(--primary-light);color:var(--primary)">${initials}</div>
+            ${emp.name}
+          </div></td>
+          <td><span class="badge ${roleColor}">${roleLabel}</span></td>
+          <td dir="ltr" style="font-size:13px;color:var(--text-muted)">${emp.email}</td>
+          <td><span class="badge ${isActive?"green":"gray"}">${isActive?"نشط":"موقوف"}</span></td>
+          <td style="font-size:12px;color:var(--text-hint)">${formatDate(emp.createdAt)}</td>
+          <td>
+            <button class="btn sm ${isActive?"danger":"success"}" onclick="toggleStatus('${emp.id}','${isActive?"inactive":"active"}')">
+              ${isActive?"<i class='ti ti-ban'></i> إيقاف":"<i class='ti ti-check'></i> تفعيل"}
+            </button>
+          </td>
+        </tr>`;
+      }).join("");
+    }
+
+    window.toggleStatus = async function(uid, newStatus) {
+      if (!confirm(`هل أنت متأكد من ${newStatus==="inactive"?"إيقاف":"تفعيل"} هذا الموظف؟`)) return;
+      try {
+        await toggleEmployeeStatus(uid, newStatus);
+        toast("تم التحديث بنجاح", "success");
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+      }
+    };
+
+    window.doAddUser = async function() {
+      const name = document.getElementById("new-name").value.trim();
+      const email = document.getElementById("new-email").value.trim();
+      const role = document.getElementById("new-role").value;
+      const password = document.getElementById("new-password").value;
+
+      if (!name || !email || !role || !password) {
+        toast("من فضلك ادخل كل البيانات المطلوبة", "error");
+        return;
+      }
+      if (password.length < 6) {
+        toast("كلمة المرور يجب أن تكون 6 أحرف على الأقل", "error");
+        return;
+      }
+
+      const btn = document.getElementById("add-user-btn");
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div> جاري الإضافة...';
+
+      try {
+        await addEmployee(name, email, password, role);
+        closeModal("modal-add-user");
+        toast("تم إضافة الموظف بنجاح ✅", "success");
+        document.getElementById("new-name").value = "";
+        document.getElementById("new-email").value = "";
+        document.getElementById("new-role").value = "";
+        document.getElementById("new-password").value = "";
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+      }
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-check"></i> إضافة';
+    };
+  </script>
+</body>
+</html>

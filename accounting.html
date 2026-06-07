@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zone Express - المحاسبة</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+</head>
+<body>
+  <div class="main" id="main-content" style="display:none">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="openSidebar()"><i class="ti ti-menu-2"></i></button>
+      <span class="page-title">تقارير المحاسبة</span>
+      <button class="btn sm" onclick="exportCSV()"><i class="ti ti-download"></i> تصدير CSV</button>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchPeriod('weekly',this)">هذا الأسبوع</div>
+      <div class="tab" onclick="switchPeriod('monthly',this)">هذا الشهر</div>
+    </div>
+
+    <div class="metrics-grid" id="acc-metrics">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+
+    <div class="profit-summary" id="profit-bar" style="display:none">
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">توزيع الأرباح</div>
+      <div style="display:flex;height:20px;border-radius:10px;overflow:hidden;gap:2px" id="profit-bar-inner"></div>
+      <div style="display:flex;gap:1.5rem;margin-top:10px;flex-wrap:wrap;font-size:13px" id="profit-legend"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">تفاصيل الطلبات المسلمة</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الكود</th>
+              <th>العميل</th>
+              <th>المنتج</th>
+              <th>سعر البيع</th>
+              <th>التكلفة</th>
+              <th>الشحن</th>
+              <th>الربح</th>
+              <th>المندوب</th>
+              <th>تاريخ التسليم</th>
+            </tr>
+          </thead>
+          <tbody id="acc-table">
+            <tr><td colspan="9"><div class="loading"><div class="spinner"></div></div></td></tr>
+          </tbody>
+          <tfoot id="acc-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { checkSession } from "./auth.js";
+    import { renderSidebar, toast, formatDate } from "./ui.js";
+    import { getProfitReport } from "./orders.js";
+
+    let currentPeriod = "weekly";
+    let currentData = null;
+
+    checkSession(async () => {
+      const role = localStorage.getItem("sf_role");
+      if (!["admin","accountant"].includes(role)) {
+        window.location.href = "dashboard.html";
+        return;
+      }
+      renderSidebar("accounting");
+      document.getElementById("main-content").style.display = "block";
+      await loadReport("weekly");
+    });
+
+    window.switchPeriod = async function(period, el) {
+      currentPeriod = period;
+      document.querySelectorAll(".tabs .tab").forEach(t => t.classList.remove("active"));
+      el.classList.add("active");
+      await loadReport(period);
+    };
+
+    async function loadReport(period) {
+      document.getElementById("acc-metrics").innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+      document.getElementById("acc-table").innerHTML = `<tr><td colspan="9"><div class="loading"><div class="spinner"></div></div></td></tr>`;
+      document.getElementById("profit-bar").style.display = "none";
+
+      try {
+        const r = await getProfitReport(period);
+        currentData = r;
+        renderMetrics(r);
+        renderTable(r.orders);
+        renderProfitBar(r);
+      } catch(e) {
+        toast("حدث خطأ في تحميل التقرير: " + e.message, "error");
+      }
+    }
+
+    function renderMetrics(r) {
+      document.getElementById("acc-metrics").innerHTML = `
+        <div class="metric-card">
+          <div class="metric-label">طلبات مسلمة</div>
+          <div class="metric-value" style="color:var(--success)">${r.totalOrders}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">إجمالي المبيعات</div>
+          <div class="metric-value">${r.totalSales.toLocaleString("ar-EG")} ج</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">إجمالي الشحن</div>
+          <div class="metric-value">${r.totalShipping.toLocaleString("ar-EG")} ج</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">إجمالي التكاليف</div>
+          <div class="metric-value" style="color:var(--danger)">${r.totalCost.toLocaleString("ar-EG")} ج</div>
+        </div>
+        <div class="metric-card" style="background:var(--success-light)">
+          <div class="metric-label">صافي الربح</div>
+          <div class="metric-value" style="color:var(--success)">${r.totalProfit.toLocaleString("ar-EG")} ج</div>
+          <div class="metric-sub">${r.totalSales ? Math.round(r.totalProfit/(r.totalSales+r.totalShipping)*100) : 0}% هامش ربح</div>
+        </div>
+      `;
+    }
+
+    function renderProfitBar(r) {
+      const total = r.totalSales + r.totalShipping;
+      if (!total) return;
+      const costPct = Math.round(r.totalCost / total * 100);
+      const profitPct = 100 - costPct;
+
+      document.getElementById("profit-bar").style.display = "block";
+      document.getElementById("profit-bar-inner").innerHTML = `
+        <div style="width:${costPct}%;background:var(--danger);opacity:.7" title="التكاليف ${costPct}%"></div>
+        <div style="width:${profitPct}%;background:var(--success)" title="الربح ${profitPct}%"></div>
+      `;
+      document.getElementById("profit-legend").innerHTML = `
+        <div style="display:flex;align-items:center;gap:6px"><div style="width:12px;height:12px;border-radius:3px;background:var(--danger);opacity:.7"></div>تكاليف (${costPct}%)</div>
+        <div style="display:flex;align-items:center;gap:6px"><div style="width:12px;height:12px;border-radius:3px;background:var(--success)"></div>أرباح (${profitPct}%)</div>
+      `;
+    }
+
+    function renderTable(orders) {
+      const tb = document.getElementById("acc-table");
+      if (!orders.length) {
+        tb.innerHTML = `<tr><td colspan="9"><div class="empty-state"><i class="ti ti-receipt-off"></i>لا توجد طلبات مسلمة في هذه الفترة</div></td></tr>`;
+        document.getElementById("acc-tfoot").innerHTML = "";
+        return;
+      }
+
+      tb.innerHTML = orders.map(o => `
+        <tr>
+          <td><span class="order-code">${o.code}</span></td>
+          <td>${o.clientName}</td>
+          <td>${o.productName}</td>
+          <td>${(o.productPrice||0).toLocaleString("ar-EG")} ج</td>
+          <td style="color:var(--danger)">${(o.productCost||0).toLocaleString("ar-EG")} ج</td>
+          <td>${(o.shippingPrice||0).toLocaleString("ar-EG")} ج</td>
+          <td style="color:var(--success);font-weight:500">${(o.profit||0).toLocaleString("ar-EG")} ج</td>
+          <td>${o.courierName || "-"}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${formatDate(o.deliveredAt)}</td>
+        </tr>
+      `).join("");
+
+      // Totals row
+      const totalSales = orders.reduce((s,o)=>s+(o.productPrice||0),0);
+      const totalCost  = orders.reduce((s,o)=>s+(o.productCost||0),0);
+      const totalShip  = orders.reduce((s,o)=>s+(o.shippingPrice||0),0);
+      const totalProfit= orders.reduce((s,o)=>s+(o.profit||0),0);
+
+      document.getElementById("acc-tfoot").innerHTML = `
+        <tr style="background:var(--surface2);font-weight:500">
+          <td colspan="3" style="font-size:13px">المجموع (${orders.length} طلب)</td>
+          <td>${totalSales.toLocaleString("ar-EG")} ج</td>
+          <td style="color:var(--danger)">${totalCost.toLocaleString("ar-EG")} ج</td>
+          <td>${totalShip.toLocaleString("ar-EG")} ج</td>
+          <td style="color:var(--success)">${totalProfit.toLocaleString("ar-EG")} ج</td>
+          <td colspan="2"></td>
+        </tr>
+      `;
+    }
+
+    window.exportCSV = function() {
+      if (!currentData || !currentData.orders.length) {
+        toast("لا توجد بيانات للتصدير", "error");
+        return;
+      }
+      const headers = ["الكود","العميل","المنتج","سعر البيع","التكلفة","الشحن","الربح","المندوب"];
+      const rows = currentData.orders.map(o => [
+        o.code, o.clientName, o.productName,
+        o.productPrice||0, o.productCost||0, o.shippingPrice||0, o.profit||0,
+        o.courierName||""
+      ]);
+      const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
+      const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `zone-express-report-${currentPeriod}-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      toast("تم تصدير التقرير ✅", "success");
+    };
+  </script>
+</body>
+</html>

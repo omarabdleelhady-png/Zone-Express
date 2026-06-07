@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zone Express - إضافة طلب</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+</head>
+<body>
+  <div class="main" id="main-content" style="display:none">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="openSidebar()"><i class="ti ti-menu-2"></i></button>
+      <span class="page-title">إضافة طلب جديد</span>
+      <a href="orders.html" class="btn sm" id="back-btn"><i class="ti ti-arrow-right"></i> رجوع</a>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><i class="ti ti-user" style="margin-left:6px"></i>بيانات التوصيل</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">الاسم الكامل *</label><input class="form-input" id="clientName" placeholder="الاسم الكامل"></div>
+        <div class="form-group"><label class="form-label">رقم الهاتف *</label><input class="form-input" id="clientPhone" type="tel" placeholder="01xxxxxxxxx" dir="ltr"></div>
+      </div>
+      <div class="form-group"><label class="form-label">العنوان التفصيلي *</label><input class="form-input" id="clientAddress" placeholder="المحافظة / المدينة / الشارع / رقم المنزل..."></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><i class="ti ti-package" style="margin-left:6px"></i>بيانات المنتج</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">اسم المنتج *</label><input class="form-input" id="productName" placeholder="اسم المنتج"></div>
+        <div class="form-group"><label class="form-label">الكمية</label><input class="form-input" id="quantity" type="number" value="1" min="1"></div>
+      </div>
+      <div class="form-group"><label class="form-label">ملاحظات إضافية</label><input class="form-input" id="notes" placeholder="أي تفاصيل إضافية..."></div>
+    </div>
+
+    <!-- حقول الأسعار للمدير فقط -->
+    <div class="card" id="pricing-card">
+      <div class="card-title"><i class="ti ti-calculator" style="margin-left:6px"></i>الأسعار والأرباح</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">سعر بيع المنتج للعميل (ج.م) *</label>
+          <input class="form-input" id="productPrice" type="number" placeholder="0" oninput="calcProfit()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">سعر الشحن (ج.م) *</label>
+          <input class="form-input" id="shippingPrice" type="number" placeholder="0" oninput="calcProfit()">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">تكلفة البضاعة (ج.م) *</label>
+          <input class="form-input" id="productCost" type="number" placeholder="0" oninput="calcProfit()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">كود الطلب (9 أرقام)</label>
+          <div style="display:flex;gap:8px">
+            <input class="form-input" id="orderCode" readonly style="font-family:monospace;letter-spacing:2px;flex:1">
+            <button class="btn" onclick="generateCode()" title="توليد كود جديد"><i class="ti ti-refresh"></i></button>
+          </div>
+        </div>
+      </div>
+      <div id="profit-preview" style="display:none">
+        <div class="profit-summary">
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">معاينة الأرباح التلقائية</div>
+          <div style="display:flex;gap:2rem;flex-wrap:wrap">
+            <div><div style="font-size:11px;color:var(--text-muted)">سعر البيع</div><div style="font-weight:500" id="pp-sell">0</div></div>
+            <div><div style="font-size:11px;color:var(--text-muted)">التكلفة</div><div style="font-weight:500;color:var(--danger)" id="pp-cost">0</div></div>
+            <div><div style="font-size:11px;color:var(--text-muted)">الشحن</div><div style="font-weight:500" id="pp-ship">0</div></div>
+            <div><div style="font-size:11px;color:var(--text-muted)">صافي الربح</div><div style="font-weight:500;font-size:20px" id="pp-profit">0</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert info" id="flow-info"><i class="ti ti-info-circle"></i> بعد إضافة الطلب، سيتم التواصل معك للتأكيد ثم سيُعين مندوب للتوصيل</div>
+
+    <div class="form-actions">
+      <a href="#" id="cancel-btn" class="btn">إلغاء</a>
+      <button class="btn primary lg" id="save-btn" onclick="saveOrder()">
+        <i class="ti ti-check"></i> تأكيد الطلب
+      </button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { checkSession, getCurrentUID, getCurrentName } from "./auth.js";
+    import { renderSidebar, toast } from "./ui.js";
+    import { addOrder, generateOrderCode } from "./orders.js";
+
+    let currentRole = "";
+
+    checkSession((user) => {
+      currentRole = localStorage.getItem("sf_role");
+      if (!["admin","client"].includes(currentRole)) {
+        window.location.href = "dashboard.html";
+        return;
+      }
+
+      renderSidebar("add-order");
+      document.getElementById("main-content").style.display = "block";
+
+      if (currentRole === "client") {
+        // إخفاء حقول الأسعار من العميل
+        document.getElementById("pricing-card").style.display = "none";
+        document.getElementById("back-btn").href = "my-orders.html";
+        document.getElementById("cancel-btn").href = "my-orders.html";
+        // تعبئة اسم العميل تلقائياً
+        document.getElementById("clientName").value = getCurrentName() || "";
+      } else {
+        document.getElementById("back-btn").href = "orders.html";
+        document.getElementById("cancel-btn").href = "orders.html";
+        generateCode();
+      }
+    });
+
+    window.generateCode = function() {
+      document.getElementById("orderCode").value = generateOrderCode();
+    };
+
+    window.calcProfit = function() {
+      const sell = parseFloat(document.getElementById("productPrice").value) || 0;
+      const ship = parseFloat(document.getElementById("shippingPrice").value) || 0;
+      const cost = parseFloat(document.getElementById("productCost").value) || 0;
+      const profit = sell + ship - cost;
+      if (sell || ship || cost) {
+        document.getElementById("profit-preview").style.display = "block";
+        document.getElementById("pp-sell").textContent = sell.toLocaleString("ar-EG") + " ج";
+        document.getElementById("pp-cost").textContent = cost.toLocaleString("ar-EG") + " ج";
+        document.getElementById("pp-ship").textContent = ship.toLocaleString("ar-EG") + " ج";
+        const el = document.getElementById("pp-profit");
+        el.textContent = profit.toLocaleString("ar-EG") + " ج";
+        el.style.color = profit >= 0 ? "var(--success)" : "var(--danger)";
+      }
+    };
+
+    window.saveOrder = async function() {
+      const clientName    = document.getElementById("clientName").value.trim();
+      const clientPhone   = document.getElementById("clientPhone").value.trim();
+      const clientAddress = document.getElementById("clientAddress").value.trim();
+      const productName   = document.getElementById("productName").value.trim();
+
+      if (!clientName || !clientPhone || !clientAddress || !productName) {
+        toast("من فضلك ادخل كل البيانات المطلوبة", "error");
+        return;
+      }
+
+      // للمدير: التحقق من الأسعار
+      if (currentRole === "admin") {
+        const productPrice  = document.getElementById("productPrice").value;
+        const shippingPrice = document.getElementById("shippingPrice").value;
+        const productCost   = document.getElementById("productCost").value;
+        if (!productPrice || !shippingPrice || !productCost) {
+          toast("من فضلك ادخل الأسعار والتكلفة", "error");
+          return;
+        }
+      }
+
+      const btn = document.getElementById("save-btn");
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div> جاري الحفظ...';
+
+      try {
+        const orderData = {
+          clientName,
+          clientPhone,
+          clientAddress,
+          productName,
+          quantity: document.getElementById("quantity").value,
+          notes: document.getElementById("notes").value.trim(),
+          productPrice: currentRole === "admin" ? document.getElementById("productPrice").value : 0,
+          shippingPrice: currentRole === "admin" ? document.getElementById("shippingPrice").value : 0,
+          productCost: currentRole === "admin" ? document.getElementById("productCost").value : 0,
+          isClientOrder: currentRole === "client",
+        };
+
+        await addOrder(orderData);
+        toast("تم إضافة الطلب بنجاح ✅", "success");
+        setTimeout(() => {
+          window.location.href = currentRole === "client" ? "my-orders.html" : "orders.html";
+        }, 1500);
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+        btn.disabled = false;
+        btn.innerHTML = '<i class="ti ti-check"></i> تأكيد الطلب';
+      }
+    };
+  </script>
+</body>
+</html>

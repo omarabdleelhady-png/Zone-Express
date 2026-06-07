@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zone Express - الطلبات</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+</head>
+<body>
+  <div class="main" id="main-content" style="display:none">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="openSidebar()"><i class="ti ti-menu-2"></i></button>
+      <span class="page-title" id="page-heading">الطلبات</span>
+      <a href="add-order.html" class="btn primary sm" id="add-btn" style="display:none">
+        <i class="ti ti-plus"></i> طلب جديد
+      </a>
+    </div>
+
+    <div class="card">
+      <div class="tabs" id="filter-tabs"></div>
+      <div style="display:flex;gap:8px;margin-bottom:1rem">
+        <input class="form-input" id="search-input" placeholder="بحث بالكود أو اسم العميل..." oninput="filterTable()" style="flex:1">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead id="table-head"></thead>
+          <tbody id="orders-body"><tr><td colspan="8"><div class="loading"><div class="spinner"></div> جاري التحميل...</div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Order Details -->
+  <div class="modal-bg" id="modal-details">
+    <div class="modal" style="max-width:600px">
+      <div class="modal-header">
+        <span class="modal-title">تفاصيل الطلب</span>
+        <button class="btn sm" onclick="closeModal('modal-details')"><i class="ti ti-x"></i></button>
+      </div>
+      <div id="modal-details-content"></div>
+    </div>
+  </div>
+
+  <!-- Modal: Assign Courier (Admin) -->
+  <div class="modal-bg" id="modal-assign">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">تعيين مندوب</span>
+        <button class="btn sm" onclick="closeModal('modal-assign')"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">اختر المندوب</label>
+        <select class="form-input" id="select-courier"></select>
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="closeModal('modal-assign')">إلغاء</button>
+        <button class="btn primary" onclick="doAssign()"><i class="ti ti-check"></i> تعيين</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Call Center Confirm -->
+  <div class="modal-bg" id="modal-callcenter">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">تأكيد الطلب مع العميل</span>
+        <button class="btn sm" onclick="closeModal('modal-callcenter')"><i class="ti ti-x"></i></button>
+      </div>
+      <div id="callcenter-order-info" style="background:var(--surface2);border-radius:var(--radius);padding:1rem;margin-bottom:1rem;font-size:14px"></div>
+      <div class="form-group">
+        <label class="form-label">ملاحظة (اختياري)</label>
+        <input class="form-input" id="cc-note" placeholder="مثال: العميل طلب التوصيل بعد الساعة 5">
+      </div>
+      <div class="form-actions">
+        <button class="btn danger" onclick="doConfirm(false)"><i class="ti ti-phone-off"></i> لم يرد</button>
+        <button class="btn success" onclick="doConfirm(true)"><i class="ti ti-phone-check"></i> تأكيد الطلب</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Delivery Proof (Courier) -->
+  <div class="modal-bg" id="modal-proof">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">إثبات التسليم</span>
+        <button class="btn sm" onclick="closeModal('modal-proof')"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">صورة إثبات التسليم</label>
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('proof-file').click()">
+          <i class="ti ti-camera" style="font-size:32px;display:block;margin-bottom:8px"></i>
+          اضغط لالتقاط صورة أو اختيار من الجهاز
+          <input type="file" id="proof-file" accept="image/*" capture="environment" style="display:none" onchange="previewProof(this)">
+        </div>
+        <img id="proof-preview" style="display:none;width:100%;border-radius:var(--radius);margin-top:8px;max-height:200px;object-fit:cover">
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="closeModal('modal-proof')">إلغاء</button>
+        <button class="btn success" id="upload-btn" onclick="doUploadProof()" disabled><i class="ti ti-upload"></i> رفع وتأكيد التسليم</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Failure Report (Courier) -->
+  <div class="modal-bg" id="modal-failure">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">تسجيل مشكلة تسليم</span>
+        <button class="btn sm" onclick="closeModal('modal-failure')"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="alert warning"><i class="ti ti-map-pin"></i> سيتم تسجيل موقعك الحالي تلقائياً كإثبات لوجودك</div>
+      <div class="form-group">
+        <label class="form-label">سبب فشل التسليم</label>
+        <select class="form-input" id="failure-reason">
+          <option value="العميل لم يرد على الهاتف">العميل لم يرد على الهاتف</option>
+          <option value="العميل رفض الاستلام">العميل رفض الاستلام</option>
+          <option value="العنوان غير صحيح">العنوان غير صحيح</option>
+          <option value="العميل غير موجود">العميل غير موجود في العنوان</option>
+          <option value="أخرى">أخرى</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="closeModal('modal-failure')">إلغاء</button>
+        <button class="btn danger" onclick="doReportFailure()"><i class="ti ti-map-pin"></i> تسجيل الموقع وإرسال</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { checkSession, getCurrentRole, getCurrentUID } from "./auth.js";
+    import { renderSidebar, statusLabels, formatDate, toast, openModal, closeModal } from "./ui.js";
+    import { listenOrders, confirmOrder, assignCourier, uploadDeliveryProof, reportDeliveryFailure, startDelivery } from "./orders.js";
+    import { getCouriers } from "./users.js";
+
+    window.openModal = openModal;
+    window.closeModal = closeModal;
+
+    let allOrders = [];
+    let currentOrderId = null;
+    let currentRole = null;
+    let filterStatus = "all";
+
+    checkSession(async (user) => {
+      currentRole = getCurrentRole();
+      renderSidebar("orders");
+      document.getElementById("main-content").style.display = "block";
+
+      if (currentRole === "admin") {
+        document.getElementById("add-btn").style.display = "flex";
+        document.getElementById("page-heading").textContent = "إدارة الطلبات";
+      } else if (currentRole === "callcenter") {
+        document.getElementById("page-heading").textContent = "طلبات تحتاج تأكيد";
+      } else if (currentRole === "courier") {
+        document.getElementById("page-heading").textContent = "طلباتي";
+      }
+
+      setupTableHead();
+      setupTabs();
+
+      const uid = getCurrentUID();
+      listenOrders(currentRole, uid, (orders) => {
+        allOrders = orders;
+        renderTable(orders);
+      });
+
+      if (currentRole === "admin") {
+        const couriers = await getCouriers();
+        const sel = document.getElementById("select-courier");
+        sel.innerHTML = couriers.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+      }
+    });
+
+    function setupTableHead() {
+      const heads = {
+        admin: ["الكود","العميل","المنتج","سعر البيع","الشحن","الربح","الحالة","المندوب","إجراءات"],
+        callcenter: ["الكود","العميل","الهاتف","المنتج","وقت الإضافة","الحالة","إجراءات"],
+        courier: ["الكود","العميل","العنوان","المنتج","الحالة","إجراءات"],
+        accountant: ["الكود","العميل","المنتج","سعر البيع","التكلفة","الشحن","الربح","الحالة"],
+      };
+      const cols = heads[currentRole] || heads.admin;
+      document.getElementById("table-head").innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`;
+    }
+
+    function setupTabs() {
+      const tabs = {
+        admin: [
+          { key:"all", label:"الكل" },
+          { key:"pending_confirmation", label:"بانتظار التأكيد" },
+          { key:"confirmed", label:"مؤكد" },
+          { key:"assigned", label:"معين مندوب" },
+          { key:"delivering", label:"جاري التوصيل" },
+          { key:"delivered", label:"تم التسليم" },
+          { key:"failed", label:"فشل التسليم" },
+        ],
+        callcenter: [
+          { key:"all", label:"الكل" },
+          { key:"pending_confirmation", label:"يحتاج اتصال" },
+          { key:"pending_client", label:"لم يرد" },
+          { key:"confirmed", label:"مؤكد" },
+        ],
+        courier: [
+          { key:"all", label:"الكل" },
+          { key:"assigned", label:"جديدة" },
+          { key:"delivering", label:"جاري التوصيل" },
+          { key:"delivered", label:"تم التسليم" },
+          { key:"failed", label:"فشل" },
+        ],
+        accountant: [
+          { key:"all", label:"الكل" },
+          { key:"delivered", label:"تم التسليم" },
+          { key:"failed", label:"فشل التسليم" },
+        ],
+      };
+
+      const list = tabs[currentRole] || tabs.admin;
+      document.getElementById("filter-tabs").innerHTML = list.map(t =>
+        `<div class="tab ${t.key==="all"?"active":""}" onclick="setTab('${t.key}',this)">${t.label}</div>`
+      ).join("");
+    }
+
+    window.setTab = function(status, el) {
+      filterStatus = status;
+      document.querySelectorAll(".tabs .tab").forEach(t => t.classList.remove("active"));
+      el.classList.add("active");
+      filterTable();
+    };
+
+    window.filterTable = function() {
+      const q = document.getElementById("search-input").value.toLowerCase();
+      let filtered = allOrders;
+      if (filterStatus !== "all") filtered = filtered.filter(o => o.status === filterStatus);
+      if (q) filtered = filtered.filter(o => o.code.includes(q) || o.clientName.toLowerCase().includes(q));
+      renderTable(filtered);
+    };
+
+    function renderTable(orders) {
+      const tb = document.getElementById("orders-body");
+      if (!orders.length) {
+        tb.innerHTML = `<tr><td colspan="9"><div class="empty-state"><i class="ti ti-package"></i>لا توجد طلبات</div></td></tr>`;
+        return;
+      }
+
+      if (currentRole === "admin") {
+        tb.innerHTML = orders.map(o => {
+          const s = statusLabels[o.status] || { label: o.status, color:"gray" };
+          return `<tr>
+            <td><span class="order-code">${o.code}</span></td>
+            <td>${o.clientName}</td>
+            <td>${o.productName}</td>
+            <td>${(o.productPrice||0).toLocaleString("ar-EG")} ج</td>
+            <td>${(o.shippingPrice||0).toLocaleString("ar-EG")} ج</td>
+            <td style="color:var(--success);font-weight:500">${(o.profit||0).toLocaleString("ar-EG")} ج</td>
+            <td><span class="badge ${s.color}">${s.label}</span></td>
+            <td>${o.courierName || (o.status==="confirmed"?`<button class="btn sm primary" onclick="openAssign('${o.id}')"><i class="ti ti-user-plus"></i> تعيين</button>`:"<span style='color:var(--text-hint)'>-</span>")}</td>
+            <td><button class="btn sm" onclick="viewOrder('${o.id}')"><i class="ti ti-eye"></i></button></td>
+          </tr>`;
+        }).join("");
+
+      } else if (currentRole === "callcenter") {
+        tb.innerHTML = orders.map(o => {
+          const s = statusLabels[o.status] || { label: o.status, color:"gray" };
+          const canAct = ["pending_confirmation","pending_client"].includes(o.status);
+          return `<tr>
+            <td><span class="order-code">${o.code}</span></td>
+            <td>${o.clientName}</td>
+            <td dir="ltr">${o.clientPhone}</td>
+            <td>${o.productName}</td>
+            <td style="font-size:12px;color:var(--text-muted)">${formatDate(o.createdAt)}</td>
+            <td><span class="badge ${s.color}">${s.label}</span></td>
+            <td>${canAct ? `<button class="btn sm primary" onclick="openCallCenter('${o.id}')"><i class="ti ti-phone"></i> تأكيد</button>` : "-"}</td>
+          </tr>`;
+        }).join("");
+
+      } else if (currentRole === "courier") {
+        tb.innerHTML = orders.map(o => {
+          const s = statusLabels[o.status] || { label: o.status, color:"gray" };
+          let actions = "";
+          if (o.status === "assigned") {
+            actions = `<button class="btn sm primary" onclick="doStartDelivery('${o.id}')"><i class="ti ti-truck"></i> بدأت التوصيل</button>`;
+          } else if (o.status === "delivering") {
+            actions = `
+              <button class="btn sm success" onclick="openProof('${o.id}')" style="margin-left:4px"><i class="ti ti-camera"></i> تسليم</button>
+              <button class="btn sm danger" onclick="openFailure('${o.id}')"><i class="ti ti-alert-triangle"></i> مشكلة</button>`;
+          }
+          return `<tr>
+            <td><span class="order-code">${o.code}</span></td>
+            <td>${o.clientName}<br><span style="font-size:12px;color:var(--text-muted)">${o.clientPhone}</span></td>
+            <td style="font-size:13px">${o.clientAddress}</td>
+            <td>${o.productName}</td>
+            <td><span class="badge ${s.color}">${s.label}</span></td>
+            <td>${actions || `<button class="btn sm" onclick="viewOrder('${o.id}')"><i class="ti ti-eye"></i></button>`}</td>
+          </tr>`;
+        }).join("");
+      }
+    }
+
+    // --- Admin: Assign Courier ---
+    window.openAssign = function(orderId) {
+      currentOrderId = orderId;
+      openModal("modal-assign");
+    };
+
+    window.doAssign = async function() {
+      const sel = document.getElementById("select-courier");
+      const courierId = sel.value;
+      const courierName = sel.options[sel.selectedIndex].text.split(" (")[0];
+      try {
+        await assignCourier(currentOrderId, courierId, courierName);
+        closeModal("modal-assign");
+        toast("تم تعيين المندوب بنجاح", "success");
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+      }
+    };
+
+    // --- Call Center: Confirm ---
+    window.openCallCenter = function(orderId) {
+      currentOrderId = orderId;
+      const order = allOrders.find(o => o.id === orderId);
+      if (!order) return;
+      document.getElementById("callcenter-order-info").innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><div style="color:var(--text-muted);font-size:12px">العميل</div><div style="font-weight:500">${order.clientName}</div></div>
+          <div><div style="color:var(--text-muted);font-size:12px">الهاتف</div><div style="font-weight:500" dir="ltr">${order.clientPhone}</div></div>
+          <div><div style="color:var(--text-muted);font-size:12px">المنتج</div><div>${order.productName}</div></div>
+          <div><div style="color:var(--text-muted);font-size:12px">العنوان</div><div style="font-size:13px">${order.clientAddress}</div></div>
+        </div>`;
+      document.getElementById("cc-note").value = "";
+      openModal("modal-callcenter");
+    };
+
+    window.doConfirm = async function(confirmed) {
+      const note = document.getElementById("cc-note").value;
+      try {
+        await confirmOrder(currentOrderId, confirmed, note);
+        closeModal("modal-callcenter");
+        toast(confirmed ? "تم تأكيد الطلب ✅" : "تم تسجيل عدم الرد، سيظهر للمراجعة لاحقاً", confirmed ? "success" : "info");
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+      }
+    };
+
+    // --- Courier: Start Delivery ---
+    window.doStartDelivery = async function(orderId) {
+      try {
+        await startDelivery(orderId);
+        toast("تم تسجيل بدء التوصيل", "success");
+      } catch(e) {
+        toast("حدث خطأ", "error");
+      }
+    };
+
+    // --- Courier: Upload Proof ---
+    window.openProof = function(orderId) {
+      currentOrderId = orderId;
+      document.getElementById("proof-preview").style.display = "none";
+      document.getElementById("proof-file").value = "";
+      document.getElementById("upload-btn").disabled = true;
+      document.getElementById("upload-zone").classList.remove("has-file");
+      openModal("modal-proof");
+    };
+
+    window.previewProof = function(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = document.getElementById("proof-preview");
+        img.src = e.target.result;
+        img.style.display = "block";
+        document.getElementById("upload-zone").classList.add("has-file");
+        document.getElementById("upload-btn").disabled = false;
+      };
+      reader.readAsDataURL(file);
+    };
+
+    window.doUploadProof = async function() {
+      const file = document.getElementById("proof-file").files[0];
+      if (!file) return;
+      const btn = document.getElementById("upload-btn");
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div> جاري الرفع...';
+      try {
+        await uploadDeliveryProof(currentOrderId, file);
+        closeModal("modal-proof");
+        toast("تم تأكيد التسليم بنجاح ✅", "success");
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+        btn.disabled = false;
+        btn.innerHTML = '<i class="ti ti-upload"></i> رفع وتأكيد التسليم';
+      }
+    };
+
+    // --- Courier: Report Failure ---
+    window.openFailure = function(orderId) {
+      currentOrderId = orderId;
+      openModal("modal-failure");
+    };
+
+    window.doReportFailure = async function() {
+      const reason = document.getElementById("failure-reason").value;
+      const btn = document.querySelector("#modal-failure .btn.danger");
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div> جاري تسجيل الموقع...';
+      try {
+        const loc = await reportDeliveryFailure(currentOrderId, reason);
+        closeModal("modal-failure");
+        toast(`تم تسجيل الموقع وإرسال التقرير ✅`, "success");
+      } catch(e) {
+        toast("تعذر الحصول على GPS: " + e.message, "error");
+      }
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-map-pin"></i> تسجيل الموقع وإرسال';
+    };
+
+    // --- View Order Details ---
+    window.viewOrder = function(orderId) {
+      const o = allOrders.find(x => x.id === orderId);
+      if (!o) return;
+      const s = statusLabels[o.status] || { label: o.status, color:"gray" };
+      let html = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem">
+          <span class="order-code">${o.code}</span>
+          <span class="badge ${s.color}">${s.label}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1rem;font-size:14px">
+          <div><div style="color:var(--text-muted);font-size:12px">العميل</div><div style="font-weight:500">${o.clientName}</div></div>
+          <div><div style="color:var(--text-muted);font-size:12px">الهاتف</div><div dir="ltr">${o.clientPhone}</div></div>
+          <div style="grid-column:span 2"><div style="color:var(--text-muted);font-size:12px">العنوان</div><div>${o.clientAddress}</div></div>
+          <div><div style="color:var(--text-muted);font-size:12px">المنتج</div><div>${o.productName}</div></div>
+          <div><div style="color:var(--text-muted);font-size:12px">الكمية</div><div>${o.quantity || 1}</div></div>
+        </div>`;
+
+      if (currentRole !== "courier") {
+        html += `
+          <div class="profit-summary">
+            <div style="display:flex;gap:2rem;flex-wrap:wrap">
+              <div><div style="font-size:11px;color:var(--text-muted)">سعر البيع</div><div style="font-weight:500">${(o.productPrice||0).toLocaleString("ar-EG")} ج</div></div>
+              <div><div style="font-size:11px;color:var(--text-muted)">التكلفة</div><div style="font-weight:500;color:var(--danger)">${(o.productCost||0).toLocaleString("ar-EG")} ج</div></div>
+              <div><div style="font-size:11px;color:var(--text-muted)">الشحن</div><div style="font-weight:500">${(o.shippingPrice||0).toLocaleString("ar-EG")} ج</div></div>
+              <div><div style="font-size:11px;color:var(--text-muted)">الربح</div><div style="font-weight:500;color:var(--success);font-size:17px">${(o.profit||0).toLocaleString("ar-EG")} ج</div></div>
+            </div>
+          </div>`;
+      }
+
+      if (o.deliveryProofUrl) {
+        html += `<div style="margin-top:1rem"><div style="font-size:13px;font-weight:500;margin-bottom:8px;color:var(--success)"><i class="ti ti-camera"></i> صورة إثبات التسليم</div>
+          <img src="${o.deliveryProofUrl}" style="width:100%;border-radius:var(--radius);max-height:250px;object-fit:cover"></div>`;
+      }
+
+      if (o.failureLocation) {
+        html += `<div style="margin-top:1rem;background:var(--warning-light);border-radius:var(--radius);padding:1rem;border:0.5px solid #EF9F27">
+          <div style="font-weight:500;color:var(--warning);margin-bottom:8px"><i class="ti ti-alert-triangle"></i> مشكلة تسليم - ${o.failureNote}</div>
+          <div style="font-size:13px;color:var(--text-muted)">موقع المندوب وقت التسليم:</div>
+          <a href="${o.failureLocation.mapsLink}" target="_blank" class="btn sm" style="margin-top:6px;color:var(--primary)">
+            <i class="ti ti-map-pin"></i> ${o.failureLocation.lat.toFixed(5)}, ${o.failureLocation.lng.toFixed(5)} - فتح على الخريطة
+          </a>
+          <div style="font-size:12px;color:var(--text-hint);margin-top:4px">دقة الموقع: ±${Math.round(o.failureLocation.accuracy || 0)} متر</div>
+        </div>`;
+      }
+
+      html += `<div class="form-actions"><button class="btn" onclick="closeModal('modal-details')">إغلاق</button></div>`;
+      document.getElementById("modal-details-content").innerHTML = html;
+      openModal("modal-details");
+    };
+  </script>
+</body>
+</html>

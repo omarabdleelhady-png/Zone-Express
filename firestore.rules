@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== Helper Functions =====
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isLoggedIn() && getRole() == 'admin';
+    }
+
+    function isAccountant() {
+      return isLoggedIn() && getRole() == 'accountant';
+    }
+
+    function isCallCenter() {
+      return isLoggedIn() && getRole() == 'callcenter';
+    }
+
+    function isCourier() {
+      return isLoggedIn() && getRole() == 'courier';
+    }
+
+    // ===== Users Collection =====
+    match /users/{userId} {
+      allow read: if isLoggedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    // ===== Couriers Collection =====
+    match /couriers/{courierId} {
+      allow read: if isLoggedIn();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ===== Orders Collection =====
+    match /orders/{orderId} {
+      // Admin: full access
+      allow read, write: if isAdmin();
+
+      // Call Center: read pending orders + update status to confirmed/pending_client
+      allow read: if isCallCenter() &&
+        resource.data.status in ['pending_confirmation','pending_client','confirmed'];
+      allow update: if isCallCenter() &&
+        request.resource.data.status in ['confirmed','pending_client'] &&
+        resource.data.status in ['pending_confirmation','pending_client'];
+
+      // Courier: read + update only their own orders
+      allow read: if isCourier() && resource.data.courierId == request.auth.uid;
+      allow update: if isCourier() &&
+        resource.data.courierId == request.auth.uid &&
+        request.resource.data.status in ['delivering','delivered','failed'];
+
+      // Accountant: read delivered/failed orders only
+      allow read: if isAccountant() &&
+        resource.data.status in ['delivered','failed'];
+    }
+
+    // ===== Settings =====
+    match /settings/{doc} {
+      allow read: if isLoggedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

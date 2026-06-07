@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zone Express - المناديب</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+</head>
+<body>
+  <div class="main" id="main-content" style="display:none">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="openSidebar()"><i class="ti ti-menu-2"></i></button>
+      <span class="page-title">المناديب</span>
+      <button class="btn primary sm" onclick="openModal('modal-add-courier')"><i class="ti ti-plus"></i> مندوب جديد</button>
+    </div>
+
+    <div class="metrics-grid" id="courier-metrics"></div>
+
+    <div class="card">
+      <div class="card-title">قائمة المناديب</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>المندوب</th>
+              <th>الهاتف</th>
+              <th>المنطقة</th>
+              <th>طلبات نشطة</th>
+              <th>إجمالي التسليم</th>
+              <th>إجمالي الفشل</th>
+              <th>معدل النجاح</th>
+              <th>الحالة</th>
+              <th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody id="couriers-table">
+            <tr><td colspan="9"><div class="loading"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Courier Orders Panel -->
+    <div class="card" id="courier-orders-panel" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <div class="card-title" id="courier-orders-title" style="margin-bottom:0">طلبات المندوب</div>
+        <button class="btn sm" onclick="document.getElementById('courier-orders-panel').style.display='none'"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>الكود</th><th>العميل</th><th>المنتج</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+          <tbody id="courier-orders-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add Courier -->
+  <div class="modal-bg" id="modal-add-courier">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">إضافة مندوب جديد</span>
+        <button class="btn sm" onclick="closeModal('modal-add-courier')"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">الاسم الكامل *</label><input class="form-input" id="c-name" placeholder="اسم المندوب"></div>
+        <div class="form-group"><label class="form-label">البريد الإلكتروني *</label><input class="form-input" id="c-email" type="email" placeholder="email@example.com" dir="ltr"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">رقم الهاتف *</label><input class="form-input" id="c-phone" type="tel" placeholder="01xxxxxxxxx" dir="ltr"></div>
+        <div class="form-group"><label class="form-label">المنطقة</label><input class="form-input" id="c-zone" placeholder="مثال: القاهرة - مدينة نصر"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">كلمة المرور المؤقتة *</label>
+        <input class="form-input" id="c-password" type="password" placeholder="6 أحرف على الأقل">
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="closeModal('modal-add-courier')">إلغاء</button>
+        <button class="btn primary" id="add-courier-btn" onclick="doAddCourier()"><i class="ti ti-check"></i> إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { checkSession } from "./auth.js";
+    import { renderSidebar, toast, openModal, closeModal, statusLabels, formatDate } from "./ui.js";
+    import { addEmployee, listenEmployees, toggleEmployeeStatus } from "./users.js";
+    import { listenOrders } from "./orders.js";
+    import { collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { db } from "./firebase-config.js";
+
+    window.openModal = openModal;
+    window.closeModal = closeModal;
+
+    let couriersData = [];
+    let ordersData = [];
+
+    checkSession(() => {
+      if (localStorage.getItem("sf_role") !== "admin") {
+        window.location.href = "dashboard.html";
+        return;
+      }
+      renderSidebar("couriers");
+      document.getElementById("main-content").style.display = "block";
+
+      // Listen couriers (role === courier)
+      listenEmployees((employees) => {
+        couriersData = employees.filter(e => e.role === "courier");
+        renderMetrics(couriersData);
+        renderTable(couriersData);
+      });
+    });
+
+    function renderMetrics(couriers) {
+      const active = couriers.filter(c => c.status !== "inactive").length;
+      document.getElementById("courier-metrics").innerHTML = `
+        <div class="metric-card"><div class="metric-label">إجمالي المناديب</div><div class="metric-value">${couriers.length}</div></div>
+        <div class="metric-card"><div class="metric-label">نشطين</div><div class="metric-value" style="color:var(--success)">${active}</div></div>
+        <div class="metric-card"><div class="metric-label">موقوفين</div><div class="metric-value" style="color:var(--danger)">${couriers.length - active}</div></div>
+      `;
+    }
+
+    function renderTable(couriers) {
+      const tb = document.getElementById("couriers-table");
+      if (!couriers.length) {
+        tb.innerHTML = `<tr><td colspan="9"><div class="empty-state"><i class="ti ti-moped"></i>لا يوجد مناديب</div></td></tr>`;
+        return;
+      }
+      tb.innerHTML = couriers.map(c => {
+        const total = (c.totalDelivered||0) + (c.totalFailed||0);
+        const rate = total ? Math.round((c.totalDelivered||0)/total*100) : "-";
+        const isActive = c.status !== "inactive";
+        const initials = c.name ? c.name.split(" ").slice(0,2).map(w=>w[0]).join("") : "م";
+        return `<tr>
+          <td><div style="display:flex;align-items:center;gap:8px">
+            <div class="avatar" style="background:var(--success-light);color:var(--success)">${initials}</div>
+            <div>
+              <div style="font-weight:500">${c.name}</div>
+              <div style="font-size:12px;color:var(--text-hint)">${c.email}</div>
+            </div>
+          </div></td>
+          <td dir="ltr" style="font-size:13px">${c.phone||"-"}</td>
+          <td style="font-size:13px;color:var(--text-muted)">${c.zone||"-"}</td>
+          <td><span class="badge blue" style="cursor:pointer" onclick="showCourierOrders('${c.id}','${c.name}','delivering')">عرض</span></td>
+          <td style="color:var(--success);font-weight:500">${c.totalDelivered||0}</td>
+          <td style="color:var(--danger)">${c.totalFailed||0}</td>
+          <td>${rate !== "-" ? `<span style="color:${rate>=80?"var(--success)":rate>=60?"var(--warning)":"var(--danger)"};font-weight:500">${rate}%</span>` : "-"}</td>
+          <td><span class="badge ${isActive?"green":"gray"}">${isActive?"نشط":"موقوف"}</span></td>
+          <td style="display:flex;gap:4px">
+            <button class="btn sm" onclick="showCourierOrders('${c.id}','${c.name}','all')"><i class="ti ti-list"></i></button>
+            <button class="btn sm ${isActive?"danger":"success"}" onclick="toggleStatus('${c.id}','${isActive?"inactive":"active"}')">
+              ${isActive?"<i class='ti ti-ban'></i>":"<i class='ti ti-check'></i>"}
+            </button>
+          </td>
+        </tr>`;
+      }).join("");
+    }
+
+    window.showCourierOrders = async function(courierId, courierName, filterStatus) {
+      const panel = document.getElementById("courier-orders-panel");
+      const tb = document.getElementById("courier-orders-table");
+      document.getElementById("courier-orders-title").textContent = `طلبات: ${courierName}`;
+      tb.innerHTML = `<tr><td colspan="5"><div class="loading"><div class="spinner"></div></div></td></tr>`;
+      panel.style.display = "block";
+      panel.scrollIntoView({behavior:"smooth"});
+
+      try {
+        let q = query(collection(db, "orders"), where("courierId", "==", courierId));
+        const snap = await getDocs(q);
+        let orders = snap.docs.map(d => ({id:d.id,...d.data()}));
+        if (filterStatus !== "all") orders = orders.filter(o => o.status === filterStatus);
+
+        if (!orders.length) {
+          tb.innerHTML = `<tr><td colspan="5"><div class="empty-state">لا توجد طلبات</div></td></tr>`;
+          return;
+        }
+
+        tb.innerHTML = orders.map(o => {
+          const s = statusLabels[o.status] || {label:o.status,color:"gray"};
+          return `<tr>
+            <td><span class="order-code">${o.code}</span></td>
+            <td>${o.clientName}</td>
+            <td>${o.productName}</td>
+            <td><span class="badge ${s.color}">${s.label}</span></td>
+            <td style="font-size:12px;color:var(--text-muted)">${formatDate(o.createdAt)}</td>
+          </tr>`;
+        }).join("");
+      } catch(e) {
+        tb.innerHTML = `<tr><td colspan="5" style="color:var(--danger)">حدث خطأ: ${e.message}</td></tr>`;
+      }
+    };
+
+    window.toggleStatus = async function(uid, newStatus) {
+      if (!confirm(`هل أنت متأكد من ${newStatus==="inactive"?"إيقاف":"تفعيل"} هذا المندوب؟`)) return;
+      try {
+        await toggleEmployeeStatus(uid, newStatus);
+        toast("تم التحديث بنجاح", "success");
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+      }
+    };
+
+    window.doAddCourier = async function() {
+      const name     = document.getElementById("c-name").value.trim();
+      const email    = document.getElementById("c-email").value.trim();
+      const phone    = document.getElementById("c-phone").value.trim();
+      const zone     = document.getElementById("c-zone").value.trim();
+      const password = document.getElementById("c-password").value;
+
+      if (!name || !email || !phone || !password) {
+        toast("من فضلك ادخل كل البيانات المطلوبة", "error");
+        return;
+      }
+      if (password.length < 6) {
+        toast("كلمة المرور يجب أن تكون 6 أحرف على الأقل", "error");
+        return;
+      }
+
+      const btn = document.getElementById("add-courier-btn");
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div> جاري الإضافة...';
+
+      try {
+        const uid = await addEmployee(name, email, password, "courier");
+        // Update phone & zone in couriers collection
+        const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+        await updateDoc(doc(db, "couriers", uid), { phone, zone });
+        closeModal("modal-add-courier");
+        toast("تم إضافة المندوب بنجاح ✅", "success");
+        ["c-name","c-email","c-phone","c-zone","c-password"].forEach(id => document.getElementById(id).value = "");
+      } catch(e) {
+        toast("حدث خطأ: " + e.message, "error");
+      }
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-check"></i> إضافة';
+    };
+  </script>
+</body>
+</html>

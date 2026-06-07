@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zone Express - طلباتي</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+  <style>
+    .order-track-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .track-steps {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-top: 1rem;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .track-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      min-width: 70px;
+      position: relative;
+    }
+    .track-step::before {
+      content: '';
+      position: absolute;
+      top: 14px;
+      right: 50%;
+      width: 100%;
+      height: 2px;
+      background: var(--border);
+      z-index: 0;
+    }
+    .track-step:first-child::before { display: none; }
+    .track-step.done::before { background: var(--success); }
+    .track-step.current::before { background: var(--primary); }
+    .step-circle {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: var(--surface2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      position: relative;
+      z-index: 1;
+    }
+    .track-step.done .step-circle {
+      background: var(--success);
+      border-color: var(--success);
+      color: white;
+    }
+    .track-step.current .step-circle {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+    .track-step.failed .step-circle {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: white;
+    }
+    .step-label {
+      font-size: 11px;
+      color: var(--text-hint);
+      margin-top: 6px;
+      text-align: center;
+    }
+    .track-step.done .step-label,
+    .track-step.current .step-label { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="main" id="main-content" style="display:none">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="openSidebar()"><i class="ti ti-menu-2"></i></button>
+      <span class="page-title">طلباتي</span>
+      <a href="add-order.html" class="btn primary sm">
+        <i class="ti ti-plus"></i> طلب جديد
+      </a>
+    </div>
+
+    <div id="orders-container">
+      <div class="loading"><div class="spinner"></div> جاري التحميل...</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { checkSession, getCurrentUID } from "./auth.js";
+    import { renderSidebar, statusLabels, formatDate } from "./ui.js";
+    import { db } from "./firebase-config.js";
+    import { collection, query, where, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    checkSession((user) => {
+      const role = localStorage.getItem("sf_role");
+      if (role !== "client") {
+        window.location.href = "dashboard.html";
+        return;
+      }
+
+      renderSidebar("my-orders");
+      document.getElementById("main-content").style.display = "block";
+
+      const uid = getCurrentUID();
+      const q = query(
+        collection(db, "orders"),
+        where("createdBy", "==", uid),
+        orderBy("createdAt", "desc")
+      );
+
+      onSnapshot(q, (snap) => {
+        const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderOrders(orders);
+      });
+    });
+
+    function getTrackSteps(status) {
+      const steps = [
+        { key: "pending_confirmation", label: "انتظار تأكيد", icon: "ti-clock" },
+        { key: "confirmed", label: "مؤكد", icon: "ti-check" },
+        { key: "assigned", label: "تم التعيين", icon: "ti-user-check" },
+        { key: "delivering", label: "جاري التوصيل", icon: "ti-truck" },
+        { key: "delivered", label: "تم التسليم", icon: "ti-package-check" },
+      ];
+
+      const order_map = {
+        pending_confirmation: 0,
+        pending_client: 0,
+        confirmed: 1,
+        assigned: 2,
+        delivering: 3,
+        delivered: 4,
+        failed: 3,
+      };
+
+      const currentIdx = order_map[status] ?? 0;
+      const isFailed = status === "failed";
+
+      return steps.map((step, idx) => {
+        let state = "pending";
+        if (isFailed && idx === 3) state = "failed";
+        else if (idx < currentIdx) state = "done";
+        else if (idx === currentIdx) state = "current";
+        return { ...step, state };
+      });
+    }
+
+    function renderOrders(orders) {
+      const container = document.getElementById("orders-container");
+
+      if (!orders.length) {
+        container.innerHTML = `
+          <div class="empty-state" style="padding:4rem;text-align:center">
+            <i class="ti ti-package" style="font-size:48px;display:block;margin-bottom:1rem;color:var(--text-hint)"></i>
+            <div style="font-size:16px;margin-bottom:8px">لا توجد طلبات بعد</div>
+            <a href="add-order.html" class="btn primary"><i class="ti ti-plus"></i> أضف طلبك الأول</a>
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = orders.map(o => {
+        const s = statusLabels[o.status] || { label: o.status, color: "gray" };
+        const steps = getTrackSteps(o.status);
+        const isFailed = o.status === "failed";
+
+        return `
+          <div class="order-track-card">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+              <div>
+                <span class="order-code">${o.code}</span>
+                <span style="font-size:13px;color:var(--text-muted);margin-right:10px">${o.productName}</span>
+              </div>
+              <span class="badge ${s.color}">${s.label}</span>
+            </div>
+
+            <div style="margin-top:10px;font-size:13px;color:var(--text-muted)">
+              <i class="ti ti-calendar" style="margin-left:4px"></i>${formatDate(o.createdAt)}
+              <span style="margin-right:16px"><i class="ti ti-map-pin" style="margin-left:4px"></i>${o.clientAddress}</span>
+            </div>
+
+            ${isFailed ? `
+              <div class="alert danger" style="margin-top:10px;font-size:13px">
+                <i class="ti ti-alert-triangle"></i>
+                تعذر التسليم — سيتم التواصل معك قريباً لإعادة الجدولة
+              </div>` : ""}
+
+            <div class="track-steps">
+              ${steps.map(step => `
+                <div class="track-step ${step.state}">
+                  <div class="step-circle">
+                    <i class="ti ${step.state === 'done' ? 'ti-check' : step.state === 'failed' ? 'ti-x' : step.icon}"></i>
+                  </div>
+                  <div class="step-label">${step.label}</div>
+                </div>
+              `).join("")}
+            </div>
+          </div>`;
+      }).join("");
+    }
+  </script>
+</body>
+</html>

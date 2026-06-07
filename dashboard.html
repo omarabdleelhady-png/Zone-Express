@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zone Express - لوحة التحكم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+</head>
+<body>
+  <div class="main" id="main-content" style="display:none">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="openSidebar()"><i class="ti ti-menu-2"></i></button>
+      <span class="page-title">لوحة التحكم</span>
+      <span style="font-size:13px;color:var(--text-muted)" id="today-date"></span>
+    </div>
+
+    <div class="metrics-grid" id="metrics"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem" id="dash-grid">
+      <div class="card">
+        <div class="card-title">آخر الطلبات</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>الكود</th><th>العميل</th><th>الحالة</th></tr></thead>
+            <tbody id="recent-orders-table"><tr><td colspan="3" class="loading"><div class="spinner"></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">ملخص الأرباح هذا الشهر</div>
+        <div id="profit-summary"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { checkSession, getCurrentRole } from "./auth.js";
+    import { renderSidebar, statusLabels, formatDate } from "./ui.js";
+    import { listenOrders, getProfitReport } from "./orders.js";
+
+    checkSession(async (user) => {
+      renderSidebar("dashboard");
+      document.getElementById("main-content").style.display = "block";
+
+      const role = getCurrentRole();
+      const today = new Date().toLocaleDateString("ar-EG", { weekday:"long", day:"2-digit", month:"long", year:"numeric" });
+      document.getElementById("today-date").textContent = today;
+
+      // Metrics by role
+      listenOrders(role, user.uid || localStorage.getItem("sf_uid"), (orders) => {
+        renderMetrics(role, orders);
+        renderRecentOrders(orders.slice(0, 6));
+      });
+
+      if (role === "admin" || role === "accountant") {
+        const report = await getProfitReport("monthly");
+        renderProfitSummary(report);
+      } else {
+        document.getElementById("dash-grid").style.gridTemplateColumns = "1fr";
+        document.querySelector("#dash-grid .card:last-child").remove();
+      }
+    });
+
+    function renderMetrics(role, orders) {
+      const el = document.getElementById("metrics");
+      if (role === "admin") {
+        const total = orders.length;
+        const delivering = orders.filter(o => ["assigned","delivering"].includes(o.status)).length;
+        const delivered = orders.filter(o => o.status === "delivered").length;
+        const pending = orders.filter(o => ["pending_confirmation","pending_client"].includes(o.status)).length;
+        el.innerHTML = `
+          <div class="metric-card"><div class="metric-label">إجمالي الطلبات</div><div class="metric-value">${total}</div></div>
+          <div class="metric-card"><div class="metric-label">قيد التوصيل</div><div class="metric-value" style="color:var(--warning)">${delivering}</div></div>
+          <div class="metric-card"><div class="metric-label">تم التسليم</div><div class="metric-value" style="color:var(--success)">${delivered}</div></div>
+          <div class="metric-card"><div class="metric-label">بانتظار التأكيد</div><div class="metric-value" style="color:var(--danger)">${pending}</div></div>
+        `;
+      } else if (role === "callcenter") {
+        const pending = orders.filter(o => o.status === "pending_confirmation").length;
+        const noAnswer = orders.filter(o => o.status === "pending_client").length;
+        const confirmed = orders.filter(o => o.status === "confirmed").length;
+        el.innerHTML = `
+          <div class="metric-card"><div class="metric-label">تحتاج اتصال</div><div class="metric-value" style="color:var(--warning)">${pending}</div></div>
+          <div class="metric-card"><div class="metric-label">العميل لم يرد</div><div class="metric-value" style="color:var(--danger)">${noAnswer}</div></div>
+          <div class="metric-card"><div class="metric-label">مؤكدة</div><div class="metric-value" style="color:var(--success)">${confirmed}</div></div>
+        `;
+      } else if (role === "courier") {
+        const assigned = orders.filter(o => o.status === "assigned").length;
+        const delivering = orders.filter(o => o.status === "delivering").length;
+        const delivered = orders.filter(o => o.status === "delivered").length;
+        el.innerHTML = `
+          <div class="metric-card"><div class="metric-label">طلبات جديدة</div><div class="metric-value" style="color:var(--primary)">${assigned}</div></div>
+          <div class="metric-card"><div class="metric-label">جاري التوصيل</div><div class="metric-value" style="color:var(--warning)">${delivering}</div></div>
+          <div class="metric-card"><div class="metric-label">تم التسليم اليوم</div><div class="metric-value" style="color:var(--success)">${delivered}</div></div>
+        `;
+      }
+    }
+
+    function renderRecentOrders(orders) {
+      const tb = document.getElementById("recent-orders-table");
+      if (!orders.length) {
+        tb.innerHTML = `<tr><td colspan="3" class="empty-state">لا توجد طلبات</td></tr>`;
+        return;
+      }
+      tb.innerHTML = orders.map(o => {
+        const s = statusLabels[o.status] || { label: o.status, color: "gray" };
+        return `<tr>
+          <td><span class="order-code">${o.code}</span></td>
+          <td>${o.clientName}</td>
+          <td><span class="badge ${s.color}">${s.label}</span></td>
+        </tr>`;
+      }).join("");
+    }
+
+    function renderProfitSummary(r) {
+      document.getElementById("profit-summary").innerHTML = `
+        <div class="profit-summary">
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:6px">صافي الربح هذا الشهر</div>
+          <div style="font-size:32px;font-weight:500;color:var(--success)">${r.totalProfit.toLocaleString("ar-EG")} ج.م</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--border)">
+            <span style="color:var(--text-muted)">إجمالي المبيعات</span><span>${r.totalSales.toLocaleString("ar-EG")} ج</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--border)">
+            <span style="color:var(--text-muted)">إجمالي الشحن</span><span>${r.totalShipping.toLocaleString("ar-EG")} ج</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0">
+            <span style="color:var(--text-muted)">إجمالي التكاليف</span><span style="color:var(--danger)">${r.totalCost.toLocaleString("ar-EG")} ج</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:500;padding:8px 0;border-top:0.5px solid var(--border)">
+            <span>عدد الطلبات المسلمة</span><span style="color:var(--success)">${r.totalOrders}</span>
+          </div>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>
+<script>
+// Redirect client to their orders page
+const _r = localStorage.getItem("sf_role");
+if (_r === "client") window.location.href = "my-orders.html";
+</script>
